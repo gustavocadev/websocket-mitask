@@ -4,6 +4,17 @@ import { db } from './db/db';
 import { task } from './db/schema';
 import { eq } from 'drizzle-orm';
 
+const publishTasks = async () => {
+  const tasks = await findTasks();
+  app.server!.publish(
+    'task',
+    JSON.stringify({
+      type: 'get-tasks',
+      payload: tasks,
+    })
+  );
+};
+
 const findTasks = async () => db.select().from(task);
 
 const app = new Elysia()
@@ -33,27 +44,13 @@ const app = new Elysia()
           state: false,
         });
 
-        const tasks = await findTasks();
-        app.server!.publish(
-          'task',
-          JSON.stringify({
-            type: 'get-tasks',
-            payload: tasks,
-          })
-        );
+        await publishTasks();
       }
       if (message.type === 'delete-task') {
         const taskId = message.payload.taskId;
 
         await db.delete(task).where(eq(task.id, taskId));
-        const tasks = await findTasks();
-        app.server!.publish(
-          'task',
-          JSON.stringify({
-            type: 'get-tasks',
-            payload: tasks,
-          })
-        );
+        await publishTasks();
       }
 
       if (message.type === 'update-task-state') {
@@ -69,14 +66,24 @@ const app = new Elysia()
           })
           .where(eq(task.id, taskId));
 
-        const tasks = await findTasks();
-        app.server!.publish(
-          'task',
-          JSON.stringify({
-            type: 'get-tasks',
-            payload: tasks,
+        await publishTasks();
+      }
+
+      if (message.type === 'update-task') {
+        const taskId = message.payload.taskId;
+        const newTask = message.payload.newTask;
+
+        await db
+          .update(task)
+          .set({
+            name: newTask.name,
+            deliveryDate: new Date(newTask.dueDate),
+            description: newTask.description,
+            priority: newTask.priority,
           })
-        );
+          .where(eq(task.id, taskId));
+
+        await publishTasks();
       }
     },
   })
