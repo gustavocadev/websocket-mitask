@@ -4,35 +4,42 @@ import { db } from './db/db';
 import { task } from './db/schema';
 import { eq } from 'drizzle-orm';
 
-const publishTasks = async () => {
-  const tasks = await findTasks();
-  app.server!.publish(
-    'task',
-    JSON.stringify({
-      type: 'get-tasks',
-      payload: tasks,
-    })
-  );
+const findTasksByProjectId = async (projectId: string) => {
+  return db.select().from(task).where(eq(task.projectId, projectId));
 };
 
-const findTasks = async () => db.select().from(task);
+const publishTasks = async (projectId: string) => {
+  try {
+    const tasks = await findTasksByProjectId(projectId);
+    app.server!.publish(
+      'task',
+      JSON.stringify({
+        type: 'get-tasks',
+        payload: tasks,
+      })
+    );
+  } catch (error) {
+    console.log(error);
+  }
+};
 
+// todo: I need to type the payload
 const app = new Elysia()
   .use(cors())
   .ws('/ws', {
     async open(ws) {
       ws.subscribe('task');
-      const tasks = await findTasks();
-      ws.send({
-        type: 'get-tasks',
-        payload: tasks,
-      });
     },
     body: t.Object({
       type: t.String(),
       payload: t.Any(),
     }),
     async message(ws, message) {
+      if (message.type === 'get-tasks') {
+        console.log(message.payload.projectId);
+        await publishTasks(message.payload.projectId);
+      }
+
       if (message.type === 'new-task') {
         const newTask = message.payload;
         await db.insert(task).values({
@@ -44,19 +51,22 @@ const app = new Elysia()
           state: false,
         });
 
-        await publishTasks();
+        await publishTasks(newTask.projectId);
       }
       if (message.type === 'delete-task') {
         const taskId = message.payload.taskId;
+        const projectId = message.payload.projectId;
 
         await db.delete(task).where(eq(task.id, taskId));
-        await publishTasks();
+
+        await publishTasks(projectId);
       }
 
       if (message.type === 'update-task-state') {
         const taskId = message.payload.taskId;
         const userId = message.payload.userId;
         const taskState = Number(message.payload.taskState);
+        const projectId = message.payload.projectId;
 
         await db
           .update(task)
@@ -66,24 +76,25 @@ const app = new Elysia()
           })
           .where(eq(task.id, taskId));
 
-        await publishTasks();
+        await publishTasks(projectId);
       }
 
       if (message.type === 'update-task') {
         const taskId = message.payload.taskId;
         const newTask = message.payload.newTask;
+        const projectId = message.payload.projectId;
 
         await db
           .update(task)
           .set({
             name: newTask.name,
-            deliveryDate: new Date(newTask.dueDate),
+            deliveryDate: new Date(newTask.deliveryDate),
             description: newTask.description,
             priority: newTask.priority,
           })
           .where(eq(task.id, taskId));
 
-        await publishTasks();
+        await publishTasks(projectId);
       }
     },
   })
